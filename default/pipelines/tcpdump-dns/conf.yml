@@ -1,0 +1,129 @@
+output: default
+streamtags:
+  - pack
+groups: {}
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: |-
+        (Planned support -- Experimental)
+        Assumes input from tcpdump -tt port 53 //
+        (dns captures)
+  - id: eval
+    filter: "true"
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: type
+          value: "/ IP \\S+\\.\\d\\d\\d+/.test(_raw) && _raw.includes('? ') ? 'q' : 'a'"
+  - id: regex_extract
+    filter: type == 'a'
+    disabled: null
+    conf:
+      source: _raw
+      iterations: 100
+      overwrite: false
+      regex: "/IP (?<server>\\S+)\\.[^. ]+ > (?<client>\\S+)\\.(?<r_port>[^. ]+):
+        (?<seq>\\d+)(?<r_flags>[-+$%*|]*) (?<r_keys>[0-9/]+) (?<r_answers>.*)
+        \\((?<count>\\d+)\\)/"
+  - id: regex_extract
+    filter: type == 'q'
+    disabled: null
+    conf:
+      source: _raw
+      iterations: 100
+      overwrite: false
+      regex: "/IP (?<client>\\S+)\\.[^. ]+ > (?<server>\\S+)\\.(?<r_port>[^. ]+):
+        (?<seq>\\d+)(?<r_flags>[-+$%*|]*) (?:\\[\\w+\\] )?(?<q_type>\\S+)\\?
+        (?<q>\\S+) \\((?<count>\\d+)/"
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: For queries, grab the base TLD (last 2 segments)
+  - id: eval
+    filter: type == 'q'
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: q_base
+          value: q.match(/.*?([^.]+\.[^.]+).?$/)[1]
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: For answers, split up the response into an array
+  - id: eval
+    filter: r_answers
+    disabled: false
+    conf:
+      add:
+        - disabled: false
+          name: r_answers
+          value: r_answers.split(', ')
+      remove: []
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Clean up or drop the raw output (optional)
+  - id: eval
+    filter: "true"
+    disabled: true
+    conf:
+      remove: []
+      keep: []
+      add:
+        - disabled: false
+          name: _raw
+          value: _raw.replace(/^.* IP /,'')
+        - disabled: true
+          name: _raw
+          value: undefined
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally aggregate to get metrics
+  - id: aggregation
+    filter: type == 'q' && !q.endsWith('in-addr.arpa.') && !__criblMetrics
+    disabled: false
+    conf:
+      passthrough: true
+      preserveGroupBys: false
+      sufficientStatsOnly: false
+      metricsMode: true
+      timeWindow: 60s
+      aggregations:
+        - count().as(count_by_client_q)
+      cumulative: false
+      flushOnInputClose: true
+      groupbys:
+        - client
+        - q_base
+    description: Passthru enabled to allow for multiple agg runs potentially
+  - id: aggregation
+    filter: type == 'a' && r_answers.includes('A 0.0.0.0') && !__criblMetrics
+    disabled: false
+    conf:
+      passthrough: true
+      preserveGroupBys: false
+      sufficientStatsOnly: false
+      metricsMode: true
+      timeWindow: 60s
+      aggregations:
+        - count().as(count_blocked_by_client)
+      cumulative: false
+      flushOnInputClose: true
+      groupbys:
+        - client
+  - id: drop
+    filter: __criblEventType !== 'stats'
+    disabled: false
+    conf: {}
+    description: Drop everything except the metrics

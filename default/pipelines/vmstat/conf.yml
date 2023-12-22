@@ -1,0 +1,171 @@
+output: default
+streamtags:
+  - pack
+groups: {}
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >
+        Assumes input from vmstat -S m 2 2 //
+
+        - Clean up the header
+
+        - Use EB to create fields from header
+
+        - vmstat has exceptionally terse field names. Let's rename them to make our life easier.
+
+        - Make numbers numbers
+
+        - Optionally drop _raw
+
+        - Turn the data into metrics
+  - id: mask
+    filter: "true"
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /procs.*[\r\n]+\s*r/
+          replaceExpr: "'r'"
+        - disabled: false
+          matchRegex: /st[\r\n]+.*[\r\n]+\s/
+          replaceExpr: "'\\n'"
+      fields:
+        - _raw
+      depth: 5
+    final: false
+    description: Remove extra header info
+  - id: event_breaker
+    filter: "true"
+    disabled: false
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: current
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^r\s.*/
+      headerLineRegex: /^r /
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    final: false
+    description: Create fields based on the header names
+  - id: rename
+    filter: "true"
+    disabled: null
+    conf:
+      wildcardDepth: 5
+      rename:
+        - currentName: b
+          newName: processes_blocked
+        - currentName: r
+          newName: processes_runable
+        - currentName: swpd
+          newName: mem_swapped
+        - currentName: free
+          newName: mem_free_mb
+        - currentName: buff
+          newName: mem_buffer_mb
+        - currentName: cache
+          newName: mem_cache_mb
+        - currentName: si
+          newName: swap_in_s
+        - currentName: so
+          newName: swap_out_s
+        - currentName: bi
+          newName: blocks_in_s
+        - currentName: bo
+          newName: blocks_out_s
+        - currentName: in
+          newName: system_interrupts_s
+        - currentName: cs
+          newName: system_context_sw_s
+        - currentName: us
+          newName: cpu_user_perc
+        - currentName: sy
+          newName: cpu_system_perc
+        - currentName: id
+          newName: cpu_idle_perc
+        - currentName: wa
+          newName: cpu_wait_perc
+        - currentName: st
+          newName: cpu_stolen_perc
+    description: Create useful/readable names
+  - id: numerify
+    filter: "true"
+    disabled: null
+    conf:
+      format: none
+      ignoreFields: []
+      filterExpr: ""
+      digits: 0
+    description: Numbers should be numbers
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop _raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+    description: Probably don't need the raw data any longer
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally convert into metrics
+  - id: publish_metrics
+    filter: "true"
+    disabled: null
+    conf:
+      overwrite: false
+      dimensions:
+        - host
+        - sourcetype
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: cpu_idle_perc
+          outFieldExpr: "'cpu_idle_perc'"
+        - metricType: gauge
+          inFieldName: cpu_system_perc
+          outFieldExpr: "'cpu_system_perc'"
+        - metricType: gauge
+          inFieldName: cpu_user_perc
+          outFieldExpr: "'cpu_user_perc'"
+        - metricType: gauge
+          inFieldName: cpu_wait_perc
+          outFieldExpr: "'cpu_wait_perc'"
+        - metricType: gauge
+          inFieldName: mem_free_mb
+          outFieldExpr: "'mem_free_mb'"
+        - metricType: gauge
+          inFieldName: mem_swapped
+          outFieldExpr: "'mem_swapped'"
+        - metricType: gauge
+          inFieldName: processes_blocked
+          outFieldExpr: "'processes_blocked'"
+        - metricType: gauge
+          inFieldName: processes_runnable
+          outFieldExpr: "'processes_runnable'"
+        - metricType: gauge
+          inFieldName: system_context_sw_s
+          outFieldExpr: "'system_context_sw_s'"
+    description: Create metrics based on the field we extracted, grouped by host
+      (and sourcetype)

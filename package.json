@@ -1,0 +1,1 @@
+{"name":"cribl-linux-utils-parsing","version":"1.0.3","author":"Jon Rust - Cribl","description":"Examples of parsing common linux utilities into more usable JSON","displayName":"Cribl Linux Utils Parsing","tags":{"streamtags":[],"dataType":["logs","metrics"],"useCase":["enrichment","aggregation","reduction"]}}

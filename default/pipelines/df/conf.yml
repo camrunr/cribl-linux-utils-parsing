@@ -1,0 +1,119 @@
+output: default
+streamtags:
+  - pack
+groups: {}
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >-
+        Assumes input from df -m // 
+
+        Parse out the data, and optionally turn into metrics suitable for metrics based data stores
+  - id: mask
+    filter: "true"
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /(Filesystem\s.*)/
+          replaceExpr: g1.toLowerCase()
+        - disabled: false
+          matchRegex: /1m-blocks/
+          replaceExpr: "'total_MiB'"
+        - disabled: false
+          matchRegex: /mounted on/
+          replaceExpr: "'mount'"
+        - disabled: false
+          matchRegex: /use%/
+          replaceExpr: "'used_perc'"
+        - disabled: false
+          matchRegex: /\s([0-9.]+)%/g
+          replaceExpr: g1
+        - disabled: false
+          matchRegex: /\sused\s/
+          replaceExpr: "' used_MiB '"
+        - disabled: false
+          matchRegex: /\savailable\s/
+          replaceExpr: "' avail_MiB '"
+      fields:
+        - _raw
+      depth: 5
+    description: Clean up the data before we parse it
+  - id: event_breaker
+    filter: "true"
+    disabled: null
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: auto
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^filesystem.*/
+      headerLineRegex: /^filesystem/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    description: Use the headers to create fields
+  - id: numerify
+    filter: "true"
+    disabled: null
+    conf:
+      format: none
+      ignoreFields: []
+      filterExpr: ""
+      digits: 0
+    description: Convert stringy numbers to number numbers
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop _raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+    description: Most often you won't need _raw any longer
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally convert to metrics
+  - id: publish_metrics
+    filter: "true"
+    disabled: null
+    conf:
+      overwrite: false
+      dimensions:
+        - filesystem
+        - host
+        - mount
+        - sourcetype
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: avail_MiB
+          outFieldExpr: "`disk_avail_MiB`"
+        - metricType: gauge
+          inFieldName: total_MiB
+          outFieldExpr: "`disk_total_MiB`"
+        - metricType: gauge
+          inFieldName: used_MiB
+          outFieldExpr: "`disk_used_MiB`"
+        - metricType: gauge
+          inFieldName: used_perc
+          outFieldExpr: "`disk_used_perc`"
+    description: Prep to dump into a metrics -based store (prom, etc)

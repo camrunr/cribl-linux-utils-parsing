@@ -1,0 +1,36 @@
+2sYWpk:
+  sampleName: ps.txt
+  created: 1698864141326
+  size: 23473
+  numEvents: 1
+xxJuMa:
+  sampleName: netstat.txt
+  created: 1698866740428
+  size: 14989
+  numEvents: 1
+idhzHH:
+  sampleName: vmstat.txt
+  created: 1698884642020
+  size: 397
+  numEvents: 1
+bL4e75:
+  sampleName: df.txt
+  created: 1698885521468
+  size: 1164
+  numEvents: 1
+Laz57p:
+  sampleName: tcpdump-dns.txt
+  created: 1702490051415
+  isPackOnly: true
+  size: 831
+  numEvents: 4
+zfVmtg:
+  sampleName: iostat-x.txt
+  created: 1702949612200
+  size: 1987
+  numEvents: 1
+R0tIiJ:
+  sampleName: iotstat-x.json
+  created: 1702957185511
+  size: 12710
+  numEvents: 1

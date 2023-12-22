@@ -1,0 +1,252 @@
+output: default
+streamtags:
+  - pack
+groups:
+  zpmoc1:
+    name: Internet connections
+    index: 2
+    description: TCP and UDP data first
+  L7Oljj:
+    name: UNIX domain sockets
+    index: 3
+    description: The 2nd clone will be for UDS, which we optionally (usually) don't use
+  VqYtBH:
+    name: Optionally convert into metrics
+    index: 7
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >-
+        Assumes input from netstat -na //
+
+        - There are 2 types of data in netstat output: Internet connections and unix data domain sockets. The clone function will allow us to more easily work on them in parallel
+
+        - For internet connections, label the event with sourcetype, clean up the field names with mask, use EB to extract based on header names, and pull out some extra detail
+
+        - For unix domain sockets, optionally drop them. If not dropped, label, clean and extrat as with the internet connection data above
+
+        - Optionally aggregate the data to get connection counts by port, etc
+
+        - The first Aggregation runs in pass thru mode so we can run a second on the same data, just getting a different view.
+
+        - If we ran Aggregations, drop any event that isn't metric data
+  - id: clone
+    filter: "true"
+    disabled: null
+    conf:
+      clones:
+        - {}
+    description: Two types of data in netstat. We want to handle them separately, so
+      we clone the event first.
+  - id: eval
+    filter: __cloneCount == 0
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'netstat:inet'"
+    groupId: zpmoc1
+    description: Label the first clone as inet
+  - id: mask
+    filter: sourcetype == 'netstat:inet'
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /Active Internet.*[\r\n]+([\s\S]+)[\r\n]+Active UNIX[\s\S]*/
+          replaceExpr: g1
+        - disabled: false
+          matchRegex: /(Proto\s+Recv-Q.*)/
+          replaceExpr: g1.toLowerCase()
+        - disabled: false
+          matchRegex: /local address/
+          replaceExpr: "`local_addr`"
+        - disabled: false
+          matchRegex: /foreign address/
+          replaceExpr: "`foreign_addr`"
+        - disabled: false
+          matchRegex: /recv-q/
+          replaceExpr: "`recv_q`"
+        - disabled: false
+          matchRegex: /send-q/
+          replaceExpr: "`send_q`"
+      fields:
+        - _raw
+      depth: 5
+    groupId: zpmoc1
+    final: false
+    description: "Clean up and normalize some field names "
+  - id: event_breaker
+    filter: sourcetype == 'netstat:inet'
+    disabled: null
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: current
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^proto\s+recv.*/
+      headerLineRegex: /^proto\s+recv/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[/
+      existingRule: ""
+    groupId: zpmoc1
+    description: Use the table headers to label the data
+  - id: eval
+    filter: sourcetype == 'netstat:inet'
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: local_port
+          value: local_addr.split(':')[1]
+        - disabled: false
+          name: foreign_ip
+          value: foreign_addr.split(':')[0]
+    groupId: zpmoc1
+    description: Extract some extra goodness we will use in aggs later
+  - id: drop
+    filter: __cloneCount == 1
+    disabled: null
+    conf: {}
+    groupId: L7Oljj
+    description: Optionally drop all the unix domain socket data
+  - id: eval
+    filter: __cloneCount == 1
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'netstat:uds'"
+    groupId: L7Oljj
+    description: Label it if we want to keep it
+  - id: mask
+    filter: sourcetype == 'netstat:uds'
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /[\s\S]*Active UNIX.*/
+          replaceExpr: "''"
+        - disabled: false
+          matchRegex: /\s\[\s([^\]]+)\s\]/g
+          replaceExpr: "` [${g1}]`"
+        - disabled: false
+          matchRegex: /\s\[ \]\s/g
+          replaceExpr: "' [] '"
+        - disabled: false
+          matchRegex: /(Proto\s+RefCnt.*)/
+          replaceExpr: g1.toLowerCase()
+      fields:
+        - _raw
+      depth: 5
+    groupId: L7Oljj
+    description: Normalize and clean up
+  - id: event_breaker
+    filter: sourcetype == 'netstat:uds'
+    disabled: null
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: current
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /proto\s+refcnt.*/
+      headerLineRegex: /^proto\s+refcnt/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    groupId: L7Oljj
+    description: Based on headers, extract the data into fields
+  - id: numerify
+    filter: "true"
+    disabled: null
+    conf:
+      format: none
+      ignoreFields:
+        - local_port
+        - proto
+        - state
+      filterExpr: ""
+      digits: 0
+    description: but some fields should not be numerified even if they have a number
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+  - id: aggregation
+    filter: sourcetype == 'netstat:inet'
+    disabled: false
+    conf:
+      passthrough: true
+      preserveGroupBys: false
+      sufficientStatsOnly: false
+      metricsMode: true
+      timeWindow: 10s
+      aggregations:
+        - count(proto).as(count)
+        - dc(foreign_ip).as(unique_addr)
+      cumulative: false
+      flushOnInputClose: true
+      groupbys:
+        - local_port
+        - state
+        - proto
+    description: Get overall count, and unique connecting address count, grouped by
+      local_port, state and proto. Running in passthru so the next agg can also
+      fire
+    groupId: VqYtBH
+  - id: aggregation
+    filter: sourcetype == 'netstat:inet' && !__criblMetrics && ( recv_q > 0 ||
+      send_q > 0)
+    disabled: false
+    conf:
+      passthrough: false
+      preserveGroupBys: false
+      sufficientStatsOnly: false
+      metricsMode: true
+      timeWindow: 10s
+      aggregations:
+        - sum(recv_q).as(recv_q_sum)
+        - sum(send_q).as(send_q_sum)
+      cumulative: false
+      flushOnInputClose: true
+      groupbys:
+        - local_port
+        - proto
+    description: If there are queues, sotal them up by local_port and proto
+    groupId: VqYtBH
+  - id: drop
+    filter: "!__criblMetrics"
+    disabled: null
+    conf: {}
+    groupId: VqYtBH
+    description: "Drop anything that wasn't metricfied "

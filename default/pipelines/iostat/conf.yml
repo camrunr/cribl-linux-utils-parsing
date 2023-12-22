@@ -1,0 +1,293 @@
+output: default
+streamtags:
+  - pack
+groups:
+  UpE8QF:
+    name: cpu stats extraction
+    index: 4
+  w8NRvw:
+    name: device stats extraction
+    index: 5
+  pPLK3X:
+    name: Optionally convert to metrics
+    index: 9
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >
+        Assumes input from iostat -x -k 5 2 //
+
+        - Grab the host and cpu count
+
+        - Clone the event so we can grab the CPU stats separately
+
+        - Parse the CPU stats using an EB to handle the tabular data
+
+        - For io stats, drop the first record in the output (since boot time)
+
+        - Clean up the remaining record to normalize and make the extract reliable
+
+        - Parse the io stats using an EB to handle the tabular data
+
+        - Numerify stringy numbers into number numbers
+
+        - Optionally convert into metrics
+  - id: regex_extract
+    filter: "true"
+    disabled: null
+    conf:
+      source: _raw
+      iterations: 100
+      overwrite: false
+      regex: /^\S+\s\S+ \((?<host>[^.\)]+).*\((?<cpu_count>\d+)/
+    description: Host and cpu are in the first part of the output
+  - id: mask
+    filter: "true"
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /.*avg-cpu:\s+/s
+          replaceExpr: "''"
+        - disabled: false
+          matchRegex: /%idle\n\s+/
+          replaceExpr: '"%idle\n"'
+        - disabled: false
+          matchRegex: /%(\S+)/g
+          replaceExpr: "`perc_${g1}`"
+      fields:
+        - _raw
+      depth: 5
+    description: We only want the second reading
+    final: false
+  - id: clone
+    filter: "true"
+    disabled: null
+    conf:
+      clones:
+        - {}
+    description: Make a copy so we can parse the cpu table separately
+  - id: eval
+    filter: __cloneCount == 0
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'iostat:cpu'"
+    groupId: UpE8QF
+    description: set a sourcetype so we can easily identify which is which
+  - id: mask
+    filter: sourcetype == 'iostat:cpu'
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /(perc_user.*)\n([\s\d.]+)[\s\S]+/
+          replaceExpr: "`${g1}\\n${g2}`"
+        - disabled: false
+          matchRegex: /%(\w)/g
+          replaceExpr: g1
+      fields:
+        - _raw
+      depth: 5
+    groupId: UpE8QF
+    description: prep for clean/normalized extract
+  - id: event_breaker
+    filter: sourcetype == 'iostat:cpu'
+    disabled: false
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: auto
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^perc_user.*/
+      headerLineRegex: /^perc_user/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    groupId: UpE8QF
+    description: Based on headers, extract the details
+  - id: eval
+    filter: __cloneCount == 1
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'iostat:disk'"
+      remove:
+        - cpu_count
+    groupId: w8NRvw
+    description: set a sourcetype so we can easily identify which is which
+  - id: mask
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /.*Device\s+/s
+          replaceExpr: "'disk_device '"
+        - disabled: false
+          matchRegex: /dscd/g
+          replaceExpr: "'discarded'"
+        - disabled: false
+          matchRegex: /wrtn/g
+          replaceExpr: "'written'"
+      fields:
+        - _raw
+      depth: 5
+    groupId: w8NRvw
+    description: prep for clean/normalized extract
+  - id: event_breaker
+    filter: sourcetype == 'iostat:disk'
+    disabled: false
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: auto
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^disk_device.*/
+      headerLineRegex: /^disk_device/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    groupId: w8NRvw
+    description: Based on headers, extract the details
+  - id: numerify
+    filter: "true"
+    disabled: null
+    conf:
+      format: none
+      ignoreFields: []
+      filterExpr: ""
+      digits: 0
+    description: Numbers should be numbers
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+    description: _raw is unlikely to be needed at this point
+  - id: eval
+    filter: sourcetype == 'iostat:cpu'
+    disabled: null
+    conf:
+      remove:
+        - _raw
+        - cribl_breaker*
+        - release
+        - nice
+    groupId: pPLK3X
+    description: Drop some fields before we metricize them
+  - id: publish_metrics
+    filter: sourcetype == 'iostat:cpu'
+    disabled: null
+    conf:
+      overwrite: true
+      dimensions:
+        - host
+        - sourcetype
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: perc_idle
+          outFieldExpr: "`cpu_idle_perc`"
+        - metricType: gauge
+          inFieldName: perc_system
+          outFieldExpr: "`cpu_system_perc`"
+        - metricType: gauge
+          inFieldName: perc_user
+          outFieldExpr: "`cpu_user_perc`"
+        - metricType: gauge
+          inFieldName: perc_iowait
+          outFieldExpr: "`cpu_iowait_perc`"
+        - metricType: gauge
+          inFieldName: perc_steal
+          outFieldExpr: "`cpu_steal_perc`"
+        - metricType: gauge
+          inFieldName: cpu_count
+          outFieldExpr: null
+    groupId: pPLK3X
+    description: Turn the log into metrics
+  - id: eval
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      remove:
+        - d*
+        - f*
+        - "*areq_sz*"
+        - "*rqm*"
+        - _raw
+        - perc_nice
+      keep:
+        - disk_device
+    groupId: pPLK3X
+    description: Drop some fields before we metricize them
+  - id: publish_metrics
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      overwrite: true
+      dimensions:
+        - host
+        - disk_device
+        - sourcetype
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: aqu_sz
+          outFieldExpr: "'disk_avg_queue'"
+        - metricType: gauge
+          inFieldName: r_await
+          outFieldExpr: "'disk_avg_read_wait_ms'"
+        - metricType: gauge
+          inFieldName: r_s
+          outFieldExpr: "'disk_reads_per_sec'"
+        - metricType: gauge
+          inFieldName: rkB_s
+          outFieldExpr: "'disk_reads_kB_sec'"
+        - metricType: gauge
+          inFieldName: w_await
+          outFieldExpr: "'disk_avg_write_wait_ms'"
+        - metricType: gauge
+          inFieldName: w_s
+          outFieldExpr: "'disk_writess_per_sec'"
+        - metricType: gauge
+          inFieldName: wkB_s
+          outFieldExpr: "'disk_writes_kB_sec'"
+        - metricType: gauge
+          inFieldName: perc_util
+          outFieldExpr: "'disk_util_perc'"
+    groupId: pPLK3X
+    description: Turn the log into metrics

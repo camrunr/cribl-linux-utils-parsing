@@ -1,0 +1,92 @@
+id: default
+groups: {}
+comments: []
+routes:
+  - id: tFwhJF
+    name: ps
+    final: true
+    disabled: false
+    pipeline: ps
+    description: Output from ps auxw
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'ps'
+    output: default
+  - id: 3vpg3p
+    name: netstat
+    final: true
+    disabled: false
+    pipeline: netstat
+    description: Output from netstat -na
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'netstat'
+    output: default
+  - id: NSkeQy
+    name: vmstat
+    final: true
+    disabled: false
+    pipeline: vmstat
+    description: Output from vmstat -S m 5 2
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'vmstat'
+    output: default
+  - id: NivKfB
+    name: iostat
+    final: true
+    disabled: false
+    pipeline: iostat
+    description: Output from iostat -x -k 5 2
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'iostat'
+    output: default
+  - id: cDAPXP
+    name: iostat-json
+    final: true
+    disabled: false
+    pipeline: iostat-json
+    description: Output from iostat -o JSON -x -k 5 2
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'iostat:json'
+    output: default
+  - id: KuIS1Z
+    name: df
+    final: true
+    disabled: false
+    pipeline: df
+    description: Output from df -m
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'df'
+    output: default
+  - id: PFZQjD
+    name: tcpdump-dns
+    final: true
+    disabled: false
+    pipeline: tcpdump-dns
+    description: Output from tcpdump -n -tt port 53
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: sourcetype == 'tcpdump:dns'
+    output: default
+  - id: default
+    name: default
+    final: true
+    disabled: false
+    pipeline: devnull
+    description: ""
+    clones: []
+    enableOutputExpression: false
+    outputExpression: null
+    filter: "true"
+    output: default

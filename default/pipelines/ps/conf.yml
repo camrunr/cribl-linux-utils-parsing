@@ -1,0 +1,165 @@
+output: default
+streamtags:
+  - pack
+groups: {}
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >-
+        Assumes input from ps auxw
+
+        - Mask to normalize some field names prior to parsing
+
+        - Parse the data using the headers as field names
+
+        - Make numbers numbers
+
+        - Extract the base command name
+
+        - Optionally drop bracketed commands (usually kernel threads)
+
+        - Optionally drop _raw 
+
+        - Aggregate to get metrics for cpu_perc and mem_perc grouped by command_base and user
+  - id: mask
+    filter: "true"
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /^(USER\s+PID.*)/
+          replaceExpr: "`${g1.toLowerCase()}`"
+        - disabled: false
+          matchRegex: /%(mem|cpu)/g
+          replaceExpr: "`${g1}_perc`"
+      fields:
+        - _raw
+      depth: 5
+    final: false
+    description: Normalize and clean up field names
+  - id: event_breaker
+    filter: "true"
+    disabled: null
+    conf:
+      existingOrNew: new
+      shouldMarkCriblBreaker: true
+      ruleType: header
+      maxEventBytes: 51200
+      timestampAnchorRegex: /^/
+      timestamp:
+        type: current
+        length: 150
+      timestampTimezone: local
+      timestampEarliest: -420weeks
+      timestampLatest: +1week
+      delimiterRegex: /\s+/
+      fieldsLineRegex: /^user\s+pid.*/
+      headerLineRegex: /^user\s+pid/
+      nullFieldVal: "-"
+      cleanFields: true
+      eventBreakerRegex: /[\n\r]+(?!\s)/
+      existingRule: ""
+    description: Create fields based on the headers
+    final: false
+  - id: numerify
+    filter: "true"
+    disabled: null
+    conf:
+      format: none
+      ignoreFields:
+        - start
+        - time
+      filterExpr: ""
+      digits: 0
+    description: Make numbers numbers, but not for all fields. Some may not work right.
+  - id: eval
+    filter: "true"
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: command_base
+          value: command.split(/\s+/)[0]
+    description: Extract the base command (sans args)
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Future plans for CCS
+  - id: eval
+    filter: "true"
+    disabled: true
+    conf:
+      add:
+        - disabled: false
+          name: _schema
+          value: "[]"
+        - disabled: false
+          value: "{'process__args':command.split(' ')}"
+          name: _schema[0]
+        - disabled: false
+          name: _schema[1]
+          value: "{'process__command_line':command}"
+        - disabled: false
+          name: _schema[2]
+          value: "{'process__executable':`${command.split(' ')[0]}`}"
+        - disabled: false
+          name: _schema[3]
+          value: "{'process__interactive': TTY != '?'}"
+        - disabled: false
+          name: _schema[4]
+          value: "{'process__pid':pid}"
+        - disabled: false
+          name: _schema[5]
+          value: "{'process__start': start}"
+        - disabled: false
+          name: _schema[6]
+          value: "{'process__user__id': user}"
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Drop bracketed commands (ie, kernel threads)
+  - id: drop
+    filter: command.startsWith('[') && command.endsWith(']')
+    disabled: null
+    conf: {}
+    description: "Optional: drop bracketed commands"
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+    description: "Optional: drop _raw"
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally convert into metrics
+  - id: aggregation
+    filter: "true"
+    disabled: false
+    conf:
+      passthrough: false
+      preserveGroupBys: false
+      sufficientStatsOnly: false
+      metricsMode: true
+      timeWindow: 10s
+      aggregations:
+        - sum(cpu_perc).as(cpu_perc)
+        - sum(mem_perc).as(mem_perc)
+      cumulative: false
+      flushOnInputClose: true
+      groupbys:
+        - command_base
+        - user
+    description: Get stats by command_base and user

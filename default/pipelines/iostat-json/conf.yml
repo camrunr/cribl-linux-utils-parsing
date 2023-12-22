@@ -1,0 +1,259 @@
+output: default
+streamtags:
+  - pack
+groups:
+  dJ3kUw:
+    name: CPU stats
+    index: 5
+  cdMVoO:
+    name: Disk stats
+    index: 6
+  J4hoNP:
+    name: Optionally convert to metrics
+    index: 9
+    description: Depending on which type of event, create the metrics data
+asyncFuncTimeout: 1000
+functions:
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: >
+        Assumes input from iostat -x -k -o JSON 5 2 //
+
+        Placeholder, not an official module of this Pack. Some commands let you output in JSON, which makes things easier. This is a demo of handling that from the iostat command.
+
+        - We start with some simple renames before we parse so the field names are normal
+
+        - Parse to make it real JSON
+
+        - Then move some of the buried data out to the top level
+
+        - Clone so we can work on the CPU stats and disk stats separately
+
+        - Move data around depending which type of data we're dealing with
+
+        - Optionally publish metrics
+  - id: mask
+    filter: "true"
+    disabled: null
+    conf:
+      rules:
+        - disabled: false
+          matchRegex: /dscd/g
+          replaceExpr: "'discarded'"
+        - disabled: false
+          matchRegex: /wrtn/g
+          replaceExpr: "'written'"
+        - disabled: false
+          matchRegex: /-sz/g
+          replaceExpr: "'_sz'"
+        - disabled: false
+          matchRegex: /avg-cpu/g
+          replaceExpr: "'cpu'"
+        - disabled: false
+          matchRegex: /number-of-cpus/g
+          replaceExpr: "'cpu_count'"
+      fields:
+        - _raw
+      depth: 5
+    description: clean up some field name prior to parsing
+  - id: serde
+    filter: "true"
+    disabled: null
+    conf:
+      mode: extract
+      type: json
+      srcField: _raw
+    description: Turn the string-JSON into JSON
+  - id: eval
+    filter: "true"
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          value: Object.assign(__e,sysstat.hosts[0])
+          name: ""
+        - disabled: true
+          value: statistics.pop()
+          name: statistics
+        - disabled: false
+          value: Object.assign(__e,statistics[1])
+          name: ""
+        - disabled: false
+          name: host
+          value: nodename.split('.')[0]
+      remove:
+        - statistics
+        - sysstat
+        - machine
+        - sysname
+        - nodename
+        - date
+    description: Move some nested data out to the top level
+  - id: clone
+    filter: "true"
+    disabled: null
+    conf:
+      clones:
+        - {}
+    description: Handle CPU and disk data separately but cloning the event, 1 for
+      cpu, 1 for disk
+  - id: eval
+    filter: __cloneCount == 0
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'iostat:cpu'"
+        - disabled: false
+          value: Object.assign(__e,cpu)
+          name: ""
+      remove:
+        - disk
+        - cpu
+    description: Label these events as CPU, move the CPU dat into the root level
+    groupId: dJ3kUw
+  - id: eval
+    filter: __cloneCount == 1
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          name: sourcetype
+          value: "'iostat:disk'"
+      remove:
+        - cpu
+        - number*
+        - release
+    description: Disk event, label as such
+    groupId: cdMVoO
+  - id: unroll
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      srcExpr: disk
+      dstField: disk
+    groupId: cdMVoO
+    description: There likely are multiple disks
+  - id: eval
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      add:
+        - disabled: false
+          value: Object.assign(__e,disk)
+          name: ""
+      remove:
+        - disk
+    groupId: cdMVoO
+    description: For disk stats, move the disk data to top level
+  - id: rename
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      wildcardDepth: 5
+      renameExpr: name.replace(/\//g,"_")
+    groupId: cdMVoO
+    description: Don't want slashes in field names
+  - id: comment
+    filter: "true"
+    disabled: null
+    conf:
+      comment: Optionally drop raw
+  - id: eval
+    filter: "true"
+    disabled: false
+    conf:
+      remove:
+        - _raw
+    description: Likely don't need the raw event any longer
+  - id: eval
+    filter: sourcetype == 'iostat:cpu'
+    disabled: null
+    conf:
+      remove:
+        - _raw
+        - cribl_breaker*
+        - release
+        - nice
+    groupId: J4hoNP
+  - id: publish_metrics
+    filter: sourcetype == 'iostat:cpu'
+    disabled: null
+    conf:
+      overwrite: true
+      dimensions:
+        - host
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: idle
+          outFieldExpr: "`cpu_idle_perc`"
+        - metricType: gauge
+          inFieldName: system
+          outFieldExpr: "`cpu_system_perc`"
+        - metricType: gauge
+          inFieldName: user
+          outFieldExpr: "`cpu_user_perc`"
+        - metricType: gauge
+          inFieldName: iowait
+          outFieldExpr: "`cpu_iowait_perc`"
+        - metricType: gauge
+          inFieldName: steal
+          outFieldExpr: "`cpu_steal_perc`"
+        - metricType: gauge
+          inFieldName: cpu_count
+          outFieldExpr: null
+    groupId: J4hoNP
+  - id: eval
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      remove:
+        - d*
+        - f*
+        - "*areq_sz*"
+        - "*rqm*"
+        - _raw
+      keep:
+        - disk_device
+    groupId: J4hoNP
+  - id: publish_metrics
+    filter: sourcetype == 'iostat:disk'
+    disabled: null
+    conf:
+      overwrite: true
+      dimensions:
+        - host
+        - disk_device
+      removeMetrics: []
+      removeDimensions: []
+      fields:
+        - metricType: gauge
+          inFieldName: aqu_sz
+          outFieldExpr: "'disk_avg_queue'"
+        - metricType: gauge
+          inFieldName: r_await
+          outFieldExpr: "'disk_avg_read_wait_ms'"
+        - metricType: gauge
+          inFieldName: r_s
+          outFieldExpr: "'disk_reads_per_sec'"
+        - metricType: gauge
+          inFieldName: rkB_s
+          outFieldExpr: "'disk_reads_kB_sec'"
+        - metricType: gauge
+          inFieldName: w_await
+          outFieldExpr: "'disk_avg_write_wait_ms'"
+        - metricType: gauge
+          inFieldName: w_s
+          outFieldExpr: "'disk_writess_per_sec'"
+        - metricType: gauge
+          inFieldName: wkB_s
+          outFieldExpr: "'disk_writes_kB_sec'"
+        - metricType: gauge
+          inFieldName: util
+          outFieldExpr: "'disk_util_perc'"
+    groupId: J4hoNP
