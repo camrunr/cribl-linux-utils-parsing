@@ -195,7 +195,7 @@ functions:
     filter: "true"
     disabled: null
     conf:
-      comment: Optionally drop raw
+      comment: Optionally drop raw to send to a metrics store
   - id: eval
     filter: "true"
     disabled: false

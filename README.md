@@ -111,6 +111,11 @@ There are many other ways to get the data flowing into Cribl. Once there, this P
 
 ## Release Notes
 
+### Version 1.0.4
+
+- Bad regex for iostat (to match only 2nd reading)
+- Better commenting
+
 ### Version 1.0.3
 
 - Cleaned up this doc

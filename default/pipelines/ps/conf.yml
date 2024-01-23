@@ -132,7 +132,7 @@ functions:
     filter: "true"
     disabled: null
     conf:
-      comment: Optionally drop raw
+      comment: Optionally drop raw to send to a metrics store
   - id: eval
     filter: "true"
     disabled: false
@@ -144,7 +144,7 @@ functions:
     filter: "true"
     disabled: null
     conf:
-      comment: Optionally convert into metrics
+      comment: Convert into metrics to send to a metrics store
   - id: aggregation
     filter: "true"
     disabled: false

@@ -11,6 +11,7 @@ groups:
   pPLK3X:
     name: Optionally convert to metrics
     index: 9
+    description: Enable this group if you want to send to a metrics store
 asyncFuncTimeout: 1000
 functions:
   - id: comment
@@ -44,6 +45,7 @@ functions:
       overwrite: false
       regex: /^\S+\s\S+ \((?<host>[^.\)]+).*\((?<cpu_count>\d+)/
     description: Host and cpu are in the first part of the output
+    final: false
   - id: mask
     filter: "true"
     disabled: null
@@ -53,7 +55,7 @@ functions:
           matchRegex: /.*avg-cpu:\s+/s
           replaceExpr: "''"
         - disabled: false
-          matchRegex: /%idle\n\s+/
+          matchRegex: /%idle[\n\r]+\s+/g
           replaceExpr: '"%idle\n"'
         - disabled: false
           matchRegex: /%(\S+)/g
@@ -70,9 +72,10 @@ functions:
       clones:
         - {}
     description: Make a copy so we can parse the cpu table separately
+    final: false
   - id: eval
     filter: __cloneCount == 0
-    disabled: null
+    disabled: false
     conf:
       add:
         - disabled: false
@@ -80,14 +83,15 @@ functions:
           value: "'iostat:cpu'"
     groupId: UpE8QF
     description: set a sourcetype so we can easily identify which is which
+    final: false
   - id: mask
     filter: sourcetype == 'iostat:cpu'
     disabled: null
     conf:
       rules:
         - disabled: false
-          matchRegex: /(perc_user.*)\n([\s\d.]+)[\s\S]+/
-          replaceExpr: "`${g1}\\n${g2}`"
+          matchRegex: /(.*[\r\n].*)[\r\n][\r\n][\s\S]*/
+          replaceExpr: "`${g1}`"
         - disabled: false
           matchRegex: /%(\w)/g
           replaceExpr: g1
@@ -96,6 +100,7 @@ functions:
       depth: 5
     groupId: UpE8QF
     description: prep for clean/normalized extract
+    final: false
   - id: event_breaker
     filter: sourcetype == 'iostat:cpu'
     disabled: false
@@ -188,7 +193,7 @@ functions:
     filter: "true"
     disabled: null
     conf:
-      comment: Optionally drop raw
+      comment: Optionally drop raw to send to a metrics store
   - id: eval
     filter: "true"
     disabled: false
